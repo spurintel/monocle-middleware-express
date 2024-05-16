@@ -1,0 +1,38 @@
+{
+  "name": "monocle-middleware-express",
+  "version": "1.0.0",
+  "description": "Protect your site with Monocle using an express middleware",
+  "main": "index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "start:spur-managed": "dotenv -e .env.spur-managed node dist/index.js",
+    "start:user-managed": "dotenv -e .env.user-managed node dist/index.js",
+    "dev:spur-managed": "dotenv -e .env.spur-managed ts-node src/index.ts",
+    "dev:user-managed": "dotenv -e .env.user-managed ts-node src/index.ts",
+    "build": "tsc"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/axios": "^0.14.0",
+    "axios": "^1.6.8",
+    "cookie": "^0.6.0",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "dotenv-cli": "^7.4.2",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "jose": "^5.3.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/cookie": "^0.6.0",
+    "@types/cookie-parser": "^1.4.7",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.12",
+    "@types/node-fetch": "^2.6.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
