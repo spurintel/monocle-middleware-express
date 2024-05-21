@@ -1,4 +1,4 @@
-# Use the official Node.js 14 image as base
+# Use the official Node.js 16 image as base
 FROM node:16
 
 # Set the working directory in the Docker image
@@ -13,5 +13,11 @@ RUN npm install
 # Copy the rest of the application
 COPY . .
 
+# Compile TypeScript files
+RUN npm run build
+
 # Expose the port your app runs on
 EXPOSE 3000
+
+# Start the application
+CMD [ "npm", "start" ]
