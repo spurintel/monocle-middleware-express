@@ -24,6 +24,8 @@ async function monocleMiddleware(req: Request, res: Response, next: NextFunction
     } else if (mclValidCookie) {
         const cookieValid = await validateCookie(req, process.env);
         if (!cookieValid) {
+            // clear the cookie
+            res.clearCookie('MCLVALID', { path: '/' });
             console.log('Invalid MCLVALID cookie found');
             const siteToken = process.env.SITE_TOKEN;
             res.render(path.join(__dirname, '..', 'views', 'monocle_captcha_page'), { siteToken });
