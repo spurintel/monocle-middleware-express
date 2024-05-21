@@ -11,6 +11,8 @@
   "files": [
     "dist",
     "src",
+    "views",
+    "LICENSE",
     "README.md"
   ],
   "dependencies": {
