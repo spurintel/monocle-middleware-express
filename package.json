@@ -1,19 +1,20 @@
 {
   "name": "monocle-middleware-express",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Protect your site with Monocle using an express middleware",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "start:spur-managed": "dotenv -e .env.spur-managed node dist/index.js",
-    "start:user-managed": "dotenv -e .env.user-managed node dist/index.js",
-    "dev:spur-managed": "dotenv -e .env.spur-managed ts-node src/index.ts",
-    "dev:user-managed": "dotenv -e .env.user-managed ts-node src/index.ts",
     "build": "tsc"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Spur Intelligence Corp",
+  "license": "GPL V3",
+  "files": [
+    "dist",
+    "src",
+    "views",
+    "LICENSE",
+    "README.md"
+  ],
   "dependencies": {
     "@types/axios": "^0.14.0",
     "axios": "^1.6.8",
