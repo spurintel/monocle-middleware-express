@@ -200,7 +200,16 @@
                 } else {
                     response.json().then((data) => {
                         console.log('Validation failed, redirecting to denied page.');
-                        window.location.href = `/denied?service=${data && data.service ? data.service : ""}`;
+
+                        // we don't have a service name check if it is a vpn or proxy so we can use a generic message
+                        var message = data && data.service ? data.service : "";
+                        if (message === "" && data.vpn) {
+                            message = "your vpn";
+                        } else if (data && data.proxy) {
+                            message = "your proxy";
+                        }
+
+                        window.location.href = `/denied?service=${message}`;
                     });
                 }
             })
