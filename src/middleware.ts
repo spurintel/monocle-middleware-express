@@ -70,8 +70,30 @@ function bufToHex(buffer: Buffer) {
     return buffer.toString('hex');
 }
 
+function getClientIpAddress(request: Request): string {
+    let clientIpAddress = request.headers['x-forwarded-for'] || request.ip;
+    if (!clientIpAddress) {
+        throw new Error('Client IP address is not available');
+    }
+
+    // if the client ip is an array, get the first element. It probably came from the x-forwarded-for header.
+    if (Array.isArray(clientIpAddress)) {
+        clientIpAddress = clientIpAddress[0];
+    }
+
+    // check if the ip is an IPv4-mapped IPv6 address
+    if (clientIpAddress.includes('::ffff:')) {
+        const ipv4Address = clientIpAddress.split(':').pop();
+        if (ipv4Address) {
+            clientIpAddress = ipv4Address;
+        }
+    }
+
+    return clientIpAddress;
+}
+
 export async function setSecureCookie(request: Request, res: Response, env: NodeJS.ProcessEnv) {
-    const clientIpAddress = request.headers['x-forwarded-for'] || request.ip;
+    var clientIpAddress = getClientIpAddress(request);
     const expiryTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
     const cookieValue = `${clientIpAddress}|${expiryTime}`;
 
@@ -133,7 +155,7 @@ export async function validateCookie(request: Request, env: NodeJS.ProcessEnv) {
 
     const [cookieClientIpAddress, expiryTime] = decryptedValue.split('|');
 
-    const clientIpAddress = request.headers['x-forwarded-for'] || request.ip;
+    const clientIpAddress = getClientIpAddress(request);
     if (clientIpAddress !== cookieClientIpAddress) {
         return false;
     }
@@ -158,7 +180,7 @@ async function validateCaptchaUserManaged(request: Request, res: Response, env: 
         const decryptResult = await compactDecrypt(captchaData, privateKey);
         const data = JSON.parse(decoder.decode(decryptResult.plaintext));
 
-        const clientIpAddress = request.headers['x-forwarded-for'] || request.ip;
+        const clientIpAddress = getClientIpAddress(request);
         const responseTime = new Date(data.ts);
         const currentTime = new Date();
         const timeDifference = Math.abs(currentTime.getTime() - responseTime.getTime()) / 1000;
@@ -222,7 +244,7 @@ async function validateCaptchaSpurManaged(request: Request, res: Response, env: 
         }
         const data = apiResponse.data as ApiResponse;
 
-        const clientIpAddress = request.headers['x-forwarded-for'] || request.ip;
+        const clientIpAddress = getClientIpAddress(request)
         const responseTime = new Date(data.ts);
         const currentTime = new Date();
         const timeDifference = Math.abs(currentTime.getTime() - responseTime.getTime()) / 1000;
