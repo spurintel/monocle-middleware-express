@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "Protect your site with Monocle using an express middleware",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc"
   },
