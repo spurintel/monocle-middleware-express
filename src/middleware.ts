@@ -11,7 +11,7 @@ interface MiddlewareConfig {
     decryptionMethod: string | undefined;
     cookieSecret: string | undefined;
     privateKey: string | undefined;
-    local: boolean | undefined;
+    local: string | undefined;
     verifyToken: string | undefined;
     nodeEnv: string | undefined;
 }
@@ -52,9 +52,7 @@ abstract class MonocleMiddleware {
 
         if (!config.local) {
             this.config.local = false;
-        } else {
-            this.config.local = config.local;
-        }
+        } else this.config.local = config.local === 'true';
 
         if (config.decryptionMethod !== 'user-managed') {
             if (!config.privateKey) {
