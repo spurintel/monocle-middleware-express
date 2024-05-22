@@ -1,1 +1,1 @@
-export { default as monocleMiddleware } from './middleware';
+export { default as MonocleMiddleware } from './middleware';
