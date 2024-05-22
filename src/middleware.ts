@@ -1,54 +1,171 @@
-import { Request, Response, NextFunction } from 'express';
+import {Request, Response, NextFunction} from 'express';
 import crypto from 'crypto';
-import { serialize, parse } from 'cookie';
-import { compactDecrypt, importPKCS8 } from 'jose';
-import { TextDecoder } from 'util';
-import axios from 'axios';
+import {serialize, parse} from 'cookie';
+import {compactDecrypt, importPKCS8} from 'jose';
+import {TextDecoder} from 'util';
 import path from 'path';
+import { decryptAssessment } from './spur';
 
-async function monocleMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
-    const cookies = parse(req.headers['cookie'] || '');
-    const mclValidCookie = cookies['MCLVALID'];
+interface MiddlewareConfig {
+    siteToken: string;
+    decryptionMethod: string;
+    cookieSecret: string;
+    privateKey: string;
+    local: boolean;
+    verifyToken: string;
+    nodeEnv: string;
+    secure: boolean;
+}
 
-    if (!mclValidCookie && req.path !== '/verify-monocle' && req.path !== '/denied') {
-        console.log('No MCLVALID cookie found');
-        const siteToken = process.env.SITE_TOKEN;
-        res.render(path.join(__dirname, '..', 'views', 'monocle_captcha_page'), { siteToken });
-        return;
-    } else if (req.path === '/denied') {
-        //  the service should be in the query string
-        const service = req.query.service;
-        console.log('Rendering denied page with service:', service)
-        res.render(path.join(__dirname, '..', 'views', 'denied'), { service });
-        return;
-    } else if (mclValidCookie) {
-        const cookieValid = await validateCookie(req, process.env);
-        if (!cookieValid) {
-            // clear the cookie
-            res.clearCookie('MCLVALID', { path: '/' });
-            console.log('Invalid MCLVALID cookie found');
-            const siteToken = process.env.SITE_TOKEN;
-            res.render(path.join(__dirname, '..', 'views', 'monocle_captcha_page'), { siteToken });
-            return;
+abstract class MonocleMiddleware {
+    protected config: MiddlewareConfig;
+
+    constructor(config: MiddlewareConfig) {
+        this.config = config;
+
+        if (!this.config.siteToken) {
+            throw new Error('siteToken is required');
         }
+
+        if (!this.config.decryptionMethod) {
+            throw new Error('decryptionMethod is required');
+        }
+
+        if (!this.config.cookieSecret) {
+            throw new Error('cookieSecret is required');
+        }
+
+        if (!this.config.local) {
+            this.config.local = false;
+        }
+
+        if (this.config.decryptionMethod !== 'user-managed') {
+            if (!this.config.privateKey) {
+                throw new Error('privateKey is required');
+            }
+        }
+
+        if (this.config.decryptionMethod !== 'spur-managed') {
+            if (!this.config.verifyToken) {
+                throw new Error('verifyToken is required');
+            }
+        }
+
+        if (!this.config.nodeEnv) {
+            this.config.nodeEnv = 'production';
+        }
+
+        this.config.secure = this.config.nodeEnv === 'production';
     }
 
-    if (req.path === '/verify-monocle' && req.method === 'POST') {
-        console.log('Verifying Monocle captcha');
-        const decryptionMethod = process.env.DECRYPTION_METHOD;
-        if (decryptionMethod === 'user-managed') {
+    abstract middleware(req: Request, res: Response, next: NextFunction): Promise<void>;
+
+    protected async createMclValidCookie(request: Request, secure: boolean, cookieSecret: string) {
+        var clientIpAddress = getClientIpAddress(request);
+        const expiryTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+        const cookieValue = `${clientIpAddress}|${expiryTime}`;
+        const secretKey = crypto.createSecretKey(hexToBuf(cookieSecret));
+        const iv = crypto.randomBytes(12); // Generate a random initialization vector
+        const cipher = crypto.createCipheriv('aes-256-gcm', secretKey, iv);
+        const encryptedValue = Buffer.concat([cipher.update(cookieValue, 'utf8'), cipher.final()]);
+        const authTag = cipher.getAuthTag();
+        const encryptedValueHex = bufToHex(encryptedValue);
+        const ivHex = bufToHex(iv);
+        const authTagHex = bufToHex(authTag);
+        const cookie = serialize('MCLVALID', `${ivHex}.${encryptedValueHex}.${authTagHex}`, {
+            secure: secure,
+            httpOnly: true,
+            path: '/',
+            sameSite: 'strict'
+        });
+
+        return {'Set-Cookie': cookie};
+    }
+
+    protected async validateCookie(clientIpAddress: string, mclValidCookie: string, cookieSecret: string) {
+        const [ivHex, encryptedValueHex, authTagHex] = mclValidCookie.split('.');
+        if (!ivHex || !encryptedValueHex || !authTagHex) {
+            return false;
+        }
+
+        const secretKey = crypto.createSecretKey(hexToBuf(cookieSecret));
+
+        const decipher = crypto.createDecipheriv('aes-256-gcm', secretKey, hexToBuf(ivHex));
+        decipher.setAuthTag(hexToBuf(authTagHex));
+
+        let decryptedValue;
+        try {
+            decryptedValue = decipher.update(encryptedValueHex, 'hex', 'utf8') + decipher.final('utf8');
+        } catch (err) {
+            console.error('Failed to decrypt:', err);
+            return false;
+        }
+
+        const [cookieClientIpAddress, expiryTime] = decryptedValue.split('|');
+        if (clientIpAddress !== cookieClientIpAddress) {
+            return false;
+        }
+
+        return Math.floor(Date.now() / 1000) < parseInt(expiryTime, 10);
+    }
+
+    protected async commonMiddleware(req: Request, res: Response): Promise<boolean> {
+        const cookies = parse(req.headers['cookie'] || '');
+        const mclValidCookie = cookies['MCLVALID'];
+        const siteToken = this.config.siteToken;
+
+        if (!mclValidCookie && req.path !== '/verify-monocle' && req.path !== '/denied') {
+            console.log('No MCLVALID cookie found');
+            res.render(path.join(__dirname, '..', 'views', 'monocle_captcha_page'), {siteToken});
+            return false;
+        } else if (req.path === '/denied') {
+            //  the service should be in the query string
+            const service = req.query.service;
+            console.log('Rendering denied page with service:', service)
+            res.render(path.join(__dirname, '..', 'views', 'denied'), {service});
+            return false;
+        } else if (mclValidCookie) {
+            const clientIpAddress = getClientIpAddress(req);
+            const cookieValid = await this.validateCookie(clientIpAddress, mclValidCookie, this.config.cookieSecret);
+            if (!cookieValid) {
+                // clear the cookie
+                res.clearCookie('MCLVALID', {path: '/'});
+                console.log('Invalid MCLVALID cookie found');
+                res.render(path.join(__dirname, '..', 'views', 'monocle_captcha_page'), {siteToken});
+                return false;
+            }
+        }
+
+        if (req.path === '/verify-monocle' && req.method === 'POST') {
+            console.log('Verifying Monocle captcha');
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+function createMonocleMiddleware(config: MiddlewareConfig): MonocleMiddleware {
+    if (config.decryptionMethod === 'user-managed') {
+        return new UserManagedMiddleware(config);
+    } else if (config.decryptionMethod === 'spur-managed') {
+        return new SpurManagedMiddleware(config);
+    } else {
+        throw new Error('Invalid decryption method');
+    }
+}
+
+class UserManagedMiddleware extends MonocleMiddleware {
+    async middleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const shouldContinue = await this.commonMiddleware(req, res);
+        if (!shouldContinue) {
+            return;
+        }
+
+        if (req.path === '/verify-monocle' && req.method === 'POST') {
+            console.log('Verifying Monocle captcha');
             console.log('Using user-managed decryption method');
-            validateCaptchaUserManaged(req, res, process.env).then(({ status, body, headers }) => {
-                console.log("Status: ", status, " Body: ", body, " Headers: ", headers)
-                if (headers) {
-                    console.log('Settings headers: ', headers);
-                    res.set(headers);
-                }
-                res.status(status).send(body);
-            });
-        } else if (decryptionMethod === 'spur-managed') {
-            console.log('Using spur-managed decryption method');
-            validateCaptchaSpurManaged(req, res, process.env).then(({ status, body, headers }) => {
+            this.validateCaptchaUserManaged(req).then(({status, body, headers}) => {
                 console.log("Status: ", status, " Body: ", body, " Headers: ", headers)
                 if (headers) {
                     res.set(headers);
@@ -56,11 +173,103 @@ async function monocleMiddleware(req: Request, res: Response, next: NextFunction
                 res.status(status).send(body);
             });
         } else {
-            console.error('Invalid DECRYPTION_METHOD environment variable');
-            res.status(500).send("Invalid DECRYPTION_METHOD environment variable");
+            next();
         }
-    } else {
-        next();
+    }
+
+    private async validateCaptchaUserManaged(request: Request) {
+        try {
+            const captchaData = request.body.captchaData;
+            const privateKey = await importPKCS8(this.config.privateKey, "ECDH-ES");
+            const decoder = new TextDecoder();
+            const decryptResult = await compactDecrypt(captchaData, privateKey);
+            const data = JSON.parse(decoder.decode(decryptResult.plaintext));
+            const clientIpAddress = getClientIpAddress(request);
+            const responseTime = new Date(data.ts);
+            const currentTime = new Date();
+            const timeDifference = Math.abs(currentTime.getTime() - responseTime.getTime()) / 1000;
+
+            console.log('Local env:', this.config.local)
+            if (this.config.local) {
+                console.log('Local environment detected, skipping IP check');
+                // @ts-ignore
+                data.ip = clientIpAddress;
+            } else {
+                console.log('Local environment not detected, checking IP')
+            }
+
+            if (timeDifference > 5 || data.ip !== clientIpAddress || data.anon) {
+                return {status: 403, body: JSON.stringify(data)};
+            }
+
+            const headers = await this.createMclValidCookie(request, this.config.secure, this.config.cookieSecret);
+            return {status: 200, body: "Captcha validated successfully", headers: headers};
+        } catch (error) {
+            if (error instanceof Error) {
+                console.error(`Error calling third-party API: ${error.message}`);
+            } else {
+                console.error(`Error calling third-party API: ${error}`);
+            }
+            return {status: 500, body: "Internal Server Error"};
+        }
+    }
+}
+
+class SpurManagedMiddleware extends MonocleMiddleware {
+    async middleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const shouldContinue = await this.commonMiddleware(req, res);
+        if (!shouldContinue) {
+            return;
+        }
+
+        if (req.path === '/verify-monocle' && req.method === 'POST') {
+            console.log('Verifying Monocle captcha');
+            console.log('Using spur-managed decryption method');
+            this.validateCaptchaSpurManaged(req, this.config.secure, this.config.cookieSecret).then(({status, body, headers}) => {
+                console.log("Status: ", status, " Body: ", body, " Headers: ", headers)
+                if (headers) {
+                    res.set(headers);
+                }
+                res.status(status).send(body);
+            });
+        } else {
+            next();
+        }
+    }
+
+    private async validateCaptchaSpurManaged(request: Request, secure: boolean, cookieSecret: string) {
+        try {
+            const captchaData = request.body.captchaData;
+            const data = await decryptAssessment(captchaData, this.config.verifyToken);
+            const clientIpAddress = getClientIpAddress(request)
+            const responseTime = new Date(data.ts);
+            const currentTime = new Date();
+            const timeDifference = Math.abs(currentTime.getTime() - responseTime.getTime()) / 1000;
+
+            console.log('Local env:', this.config.local)
+            if (this.config.local) {
+                console.log('Local environment detected, skipping IP check');
+                // @ts-ignore
+                data.ip = clientIpAddress;
+            } else {
+                console.log('Local environment not detected, checking IP')
+            }
+
+            if (timeDifference > 5 || data.ip !== clientIpAddress || data.anon) {
+                console.log('Captcha validation failed for ip and data:', clientIpAddress, data);
+                return {status: 403, body: JSON.stringify(data)};
+            }
+
+            const headers = await this.createMclValidCookie(request, secure, cookieSecret);
+            return {status: 200, body: "Captcha validated successfully", headers: headers};
+        } catch (error) {
+            if (error instanceof Error) {
+                console.error(`Error calling third-party API: ${error.message}`);
+            } else {
+                console.error(`Error calling third-party API: ${error}`);
+            }
+            return {status: 500, body: "Internal Server Error"};
+        }
     }
 }
 
@@ -94,189 +303,4 @@ function getClientIpAddress(request: Request): string {
     return clientIpAddress;
 }
 
-export async function setSecureCookie(request: Request, res: Response, env: NodeJS.ProcessEnv) {
-    var clientIpAddress = getClientIpAddress(request);
-    const expiryTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
-    const cookieValue = `${clientIpAddress}|${expiryTime}`;
-
-    const cookieSecretValue = env.COOKIE_SECRET;
-    if (!cookieSecretValue) {
-        throw new Error('COOKIE_SECRET is not set');
-    }
-    const secretKey = crypto.createSecretKey(hexToBuf(cookieSecretValue));
-
-    const iv = crypto.randomBytes(12); // Generate a random initialization vector
-
-    const cipher = crypto.createCipheriv('aes-256-gcm', secretKey, iv);
-    const encryptedValue = Buffer.concat([cipher.update(cookieValue, 'utf8'), cipher.final()]);
-    const authTag = cipher.getAuthTag();
-
-    const encryptedValueHex = bufToHex(encryptedValue);
-    const ivHex = bufToHex(iv);
-    const authTagHex = bufToHex(authTag);
-
-    const isSecure = process.env.NODE_ENV === 'production'; // secure if in production environment
-    const cookie = serialize('MCLVALID', `${ivHex}.${encryptedValueHex}.${authTagHex}`, {
-        secure: isSecure,
-        httpOnly: true,
-        path: '/',
-        sameSite: 'strict'
-    });
-
-    return { 'Set-Cookie': cookie };
-}
-
-export async function validateCookie(request: Request, env: NodeJS.ProcessEnv) {
-    const cookies = parse(request.headers['cookie'] || '');
-    const mclValidCookie = cookies['MCLVALID'];
-    if (!mclValidCookie) {
-        return false;
-    }
-
-    const [ivHex, encryptedValueHex, authTagHex] = mclValidCookie.split('.');
-    if (!ivHex || !encryptedValueHex || !authTagHex) {
-        return false;
-    }
-
-    const cookieSecretValue = env.COOKIE_SECRET;
-    if (!cookieSecretValue) {
-        throw new Error('COOKIE_SECRET is not set');
-    }
-    const secretKey = crypto.createSecretKey(hexToBuf(cookieSecretValue));
-
-    const decipher = crypto.createDecipheriv('aes-256-gcm', secretKey, hexToBuf(ivHex));
-    decipher.setAuthTag(hexToBuf(authTagHex));
-
-    let decryptedValue;
-    try {
-        decryptedValue = decipher.update(encryptedValueHex, 'hex', 'utf8') + decipher.final('utf8');
-    } catch (err) {
-        console.error('Failed to decrypt:', err);
-        return false;
-    }
-
-    const [cookieClientIpAddress, expiryTime] = decryptedValue.split('|');
-
-    const clientIpAddress = getClientIpAddress(request);
-    if (clientIpAddress !== cookieClientIpAddress) {
-        return false;
-    }
-
-    if (Math.floor(Date.now() / 1000) >= parseInt(expiryTime, 10)) {
-        return false;
-    }
-
-    return true;
-}
-
-async function validateCaptchaUserManaged(request: Request, res: Response, env: NodeJS.ProcessEnv) {
-    try {
-        const captchaData = request.body.captchaData;
-        const envPrivateKey = env.PRIVATE_KEY;
-        if (!captchaData || !envPrivateKey) {
-            return { status: 400, body: "Bad Request" };
-        }
-        const privateKey = await importPKCS8(envPrivateKey, "ECDH-ES");
-
-        const decoder = new TextDecoder();
-        const decryptResult = await compactDecrypt(captchaData, privateKey);
-        const data = JSON.parse(decoder.decode(decryptResult.plaintext));
-
-        const clientIpAddress = getClientIpAddress(request);
-        const responseTime = new Date(data.ts);
-        const currentTime = new Date();
-        const timeDifference = Math.abs(currentTime.getTime() - responseTime.getTime()) / 1000;
-
-        const localEnv = process.env.LOCAL;
-        console.log('Local env:', localEnv)
-        if (localEnv === 'true') {
-            console.log('Local environment detected, skipping IP check');
-            // @ts-ignore
-            data.ip = clientIpAddress;
-        } else {
-            console.log('Local environment not detected, checking IP')
-        }
-
-        if (timeDifference > 5 || data.ip !== clientIpAddress || data.anon) {
-            return { status: 403, body: JSON.stringify(data) };
-        }
-
-        const headers = await setSecureCookie(request, res, env);
-        return { status: 200, body: "Captcha validated successfully", headers: headers };
-    } catch (error) {
-        if (error instanceof Error) {
-            console.error(`Error calling third-party API: ${error.message}`);
-        } else {
-            console.error(`Error calling third-party API: ${error}`);
-        }
-        return { status: 500, body: "Internal Server Error" };
-    }
-}
-
-interface ApiResponse {
-    vpn: boolean;
-    proxied: boolean;
-    anon: boolean;
-    ip: string;
-    ts: string;
-    complete: boolean;
-    id: string;
-    ipv6: string;
-    service: string;
-}
-
-async function validateCaptchaSpurManaged(request: Request, res: Response, env: NodeJS.ProcessEnv) {
-    const thirdPartyApiUrl = 'https://decrypt.mcl.spur.us/api/v1/assessment';
-    try {
-        const captchaData = request.body.captchaData;
-        const envVerifyToken = env.VERIFY_TOKEN;
-        if (!captchaData || !envVerifyToken) {
-            return { status: 400, body: "Bad Request" };
-        }
-
-        const apiResponse = await axios.post(thirdPartyApiUrl, captchaData, {
-            headers: {
-                'Content-Type': 'text/plain',
-                'Token': envVerifyToken,
-            },
-        });
-
-        if (apiResponse.status !== 200) {
-            throw new Error(`API call failed: ${apiResponse.statusText}`);
-        }
-        const data = apiResponse.data as ApiResponse;
-
-        const clientIpAddress = getClientIpAddress(request)
-        const responseTime = new Date(data.ts);
-        const currentTime = new Date();
-        const timeDifference = Math.abs(currentTime.getTime() - responseTime.getTime()) / 1000;
-
-        const localEnv = process.env.LOCAL;
-
-        console.log('Local env:', localEnv)
-        if (localEnv === 'true') {
-            console.log('Local environment detected, skipping IP check');
-            // @ts-ignore
-            data.ip = clientIpAddress;
-        } else {
-            console.log('Local environment not detected, checking IP')
-        }
-
-        if (timeDifference > 5 || data.ip !== clientIpAddress || data.anon) {
-            console.log('Captcha validation failed for ip and data:', clientIpAddress, data);
-            return { status: 403, body: JSON.stringify(data) };
-        }
-
-        const headers = await setSecureCookie(request, res, env);
-        return { status: 200, body: "Captcha validated successfully", headers: headers };
-    } catch (error) {
-        if (error instanceof Error) {
-            console.error(`Error calling third-party API: ${error.message}`);
-        } else {
-            console.error(`Error calling third-party API: ${error}`);
-        }
-        return { status: 500, body: "Internal Server Error" };
-    }
-}
-
-export default monocleMiddleware;
+export default createMonocleMiddleware;
