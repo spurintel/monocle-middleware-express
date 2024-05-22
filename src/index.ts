@@ -1,1 +1,1 @@
-export { default as MonocleMiddleware } from './middleware';
+export { default as middleware } from './middleware';
