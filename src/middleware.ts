@@ -79,7 +79,7 @@ abstract class MonocleMiddleware {
         this.config.secure = this.config.nodeEnv === 'production';
     }
 
-    abstract middleware(req: Request, res: Response, next: NextFunction): Promise<void>;
+    abstract guard(req: Request, res: Response, next: NextFunction): Promise<void>;
 
     protected async createMclValidCookie(request: Request, secure: boolean, cookieSecret: string) {
         var clientIpAddress = getClientIpAddress(request);
@@ -177,7 +177,7 @@ function createMonocleMiddleware(config: MiddlewareConfig): MonocleMiddleware {
 }
 
 class UserManagedMiddleware extends MonocleMiddleware {
-    async middleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+    async guard(req: Request, res: Response, next: NextFunction): Promise<void> {
         const shouldContinue = await this.commonMiddleware(req, res);
         if (!shouldContinue) {
             return;
@@ -237,7 +237,7 @@ class UserManagedMiddleware extends MonocleMiddleware {
 }
 
 class SpurManagedMiddleware extends MonocleMiddleware {
-    async middleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+    async guard(req: Request, res: Response, next: NextFunction): Promise<void> {
         const shouldContinue = await this.commonMiddleware(req, res);
         if (!shouldContinue) {
             return;
