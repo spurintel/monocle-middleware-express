@@ -54,7 +54,7 @@ abstract class MonocleMiddleware {
             this.config.local = false;
         } else this.config.local = config.local === 'true';
 
-        if (config.decryptionMethod !== 'user-managed') {
+        if (config.decryptionMethod === 'user-managed') {
             if (!config.privateKey) {
                 throw new Error('privateKey is required');
             } else {
@@ -62,7 +62,7 @@ abstract class MonocleMiddleware {
             }
         }
 
-        if (config.decryptionMethod !== 'spur-managed') {
+        if (config.decryptionMethod === 'spur-managed') {
             if (!config.verifyToken) {
                 throw new Error('verifyToken is required');
             } else {
