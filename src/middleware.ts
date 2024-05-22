@@ -7,6 +7,16 @@ import path from 'path';
 import { decryptAssessment } from './spur';
 
 interface MiddlewareConfig {
+    siteToken: string | undefined;
+    decryptionMethod: string | undefined;
+    cookieSecret: string | undefined;
+    privateKey: string | undefined;
+    local: boolean | undefined;
+    verifyToken: string | undefined;
+    nodeEnv: string | undefined;
+}
+
+interface ValidatedConfig {
     siteToken: string;
     decryptionMethod: string;
     cookieSecret: string;
@@ -18,41 +28,54 @@ interface MiddlewareConfig {
 }
 
 abstract class MonocleMiddleware {
-    protected config: MiddlewareConfig;
+    protected config: ValidatedConfig;
 
     constructor(config: MiddlewareConfig) {
-        this.config = config;
-
-        if (!this.config.siteToken) {
+        this.config = {} as ValidatedConfig;
+        if (!config.siteToken) {
             throw new Error('siteToken is required');
+        } else {
+            this.config.siteToken = config.siteToken;
         }
 
-        if (!this.config.decryptionMethod) {
+        if (!config.decryptionMethod) {
             throw new Error('decryptionMethod is required');
+        } else {
+            this.config.decryptionMethod = config.decryptionMethod;
         }
 
-        if (!this.config.cookieSecret) {
+        if (!config.cookieSecret) {
             throw new Error('cookieSecret is required');
+        } else {
+            this.config.cookieSecret = config.cookieSecret;
         }
 
-        if (!this.config.local) {
+        if (!config.local) {
             this.config.local = false;
+        } else {
+            this.config.local = config.local;
         }
 
-        if (this.config.decryptionMethod !== 'user-managed') {
-            if (!this.config.privateKey) {
+        if (config.decryptionMethod !== 'user-managed') {
+            if (!config.privateKey) {
                 throw new Error('privateKey is required');
+            } else {
+                this.config.privateKey = config.privateKey;
             }
         }
 
-        if (this.config.decryptionMethod !== 'spur-managed') {
-            if (!this.config.verifyToken) {
+        if (config.decryptionMethod !== 'spur-managed') {
+            if (!config.verifyToken) {
                 throw new Error('verifyToken is required');
+            } else {
+                this.config.verifyToken = config.verifyToken;
             }
         }
 
-        if (!this.config.nodeEnv) {
+        if (!config.nodeEnv) {
             this.config.nodeEnv = 'production';
+        } else {
+            this.config.nodeEnv = config.nodeEnv;
         }
 
         this.config.secure = this.config.nodeEnv === 'production';
