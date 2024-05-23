@@ -66,6 +66,7 @@ function spurManagedMiddleware(config: ValidatedConfig) {
     return async function(req: Request, res: Response, next: NextFunction): Promise<void> {
         const shouldContinue = await commonMiddleware(req, res, config);
         if (!shouldContinue) {
+            console.log('Should not continue')
             return;
         }
 
@@ -80,6 +81,7 @@ function spurManagedMiddleware(config: ValidatedConfig) {
                 res.status(status).send(body);
             });
         } else {
+            console.log('Next')
             next();
         }
     }
