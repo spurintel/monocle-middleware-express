@@ -130,7 +130,7 @@ abstract class MonocleMiddleware {
         return Math.floor(Date.now() / 1000) < parseInt(expiryTime, 10);
     }
 
-    protected async commonMiddleware(req: Request, res: Response): Promise<boolean> {
+    protected commonMiddleware = async (req: Request, res: Response): Promise<boolean> => {
         const cookies = parse(req.headers['cookie'] || '');
         const mclValidCookie = cookies['MCLVALID'];
         const siteToken = this.config.siteToken;
