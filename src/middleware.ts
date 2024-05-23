@@ -43,6 +43,7 @@ function userManagedMiddleware(config: ValidatedConfig) {
     return async function(req: Request, res: Response, next: NextFunction): Promise<void> {
         const shouldContinue = await commonMiddleware(req, res, config);
         if (!shouldContinue) {
+            console.log('Should not continue')
             return;
         }
 
@@ -57,6 +58,7 @@ function userManagedMiddleware(config: ValidatedConfig) {
                 res.status(status).send(body);
             });
         } else {
+            console.log('Next')
             next();
         }
     }
@@ -164,12 +166,7 @@ async function commonMiddleware(req: Request, res: Response, config: ValidatedCo
         }
     }
 
-    if (req.path === '/verify-monocle' && req.method === 'POST') {
-        console.log('Verifying Monocle captcha');
-        return true;
-    } else {
-        return false;
-    }
+    return true;
 }
 
 function validateConfig(config: MiddlewareConfig): ValidatedConfig {
