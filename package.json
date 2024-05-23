@@ -5,14 +5,12 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "postinstall": "tsc"
+    "build": "tsc"
   },
   "author": "Spur Intelligence Corp",
   "license": "GPL V3",
   "files": [
     "dist",
-    "src",
     "views",
     "LICENSE",
     "README.md"
