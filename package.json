@@ -17,7 +17,7 @@
   ],
   "dependencies": {
     "@types/axios": "^0.14.0",
-    "axios": "^1.6.8",
+    "axios": "^1.16.1",
     "cookie": "^0.6.0",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
